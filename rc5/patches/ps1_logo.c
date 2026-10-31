@@ -1,4 +1,4 @@
-/* PicoStation RC5.CS01 — optional RGBA logo, preserving RC5 menu functions.
+/* PicoStation RC5.CS02 — optional RGBA logo, preserving RC5 menu functions.
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <stdint.h>

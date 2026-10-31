@@ -1,6 +1,6 @@
-# RC5 PU18 / PU8 et extension CS01
+# RC5 PU18 / PU8 et extension CS02
 
-Cette chaîne cible les cartes PS1 **PU18 et PU8, Pico RP2040, sans overclock**. Aucune variante overclockée ou Pico 2 n’est produite. Le démarrage, les jeux et la personnalisation ont été confirmés par l’utilisateur sur PU18 ; la PU8 reste expérimentale et à vérifier sur console.
+Cette chaîne cible les cartes PS1 **PU18 et PU8, Pico RP2040, sans overclock**. Aucune variante overclockée ou Pico 2 n’est produite. Les essais utilisateur CS01 ont confirmé le démarrage, les jeux et la personnalisation sur PU18. CS02 corrige le défaut du coin inférieur droit ; les contrôles et l’essai visuel du diagnostic CS02 sur PU18 confirment la réception intégrale du fond et la disparition du rectangle. La PU8 reste à vérifier sur le matériel.
 
 ## Nature de la reconstruction
 
@@ -39,14 +39,16 @@ Le script trouve les outils dans le PATH ou dans leurs installations Homebrew ha
 La carte choisie est PU18 si l’argument `--board` est absent. Les fichiers de chaque carte sont isolés dans `build-cs/PU18/` ou `build-cs/PU8/` :
 
 - `picostation_<CARTE>_RC5-reconstruit.uf2` : référence reconstruite et vérifiée identique à la RC5 de cette carte.
-- `picostation_<CARTE>_RC5.CS01-experimental.uf2` : extension CS01 de cette carte.
+- `picostation_<CARTE>_RC5.CS02-experimental.uf2` : extension CS02 de cette carte.
 - `build-report.json` : empreintes, adresses des modifications, tailles et paramètres du build.
 
-Les fichiers déjà produits par l’ancienne chaîne à la racine de `build-cs/` ne sont pas supprimés ; les nouveaux résultats sont dans les sous-dossiers par carte. Le code C de personnalisation et les fichiers SD sont communs aux deux cartes. La recompilation PU18 avec les mêmes outils conserve exactement le firmware CS01 déjà testé.
+Les fichiers déjà produits par l’ancienne chaîne à la racine de `build-cs/` ne sont pas supprimés ; les nouveaux résultats sont dans les sous-dossiers par carte. Le code C de personnalisation et les fichiers SD sont communs aux deux cartes. Les deux variantes CS02 conservent les deux différences de carte vérifiées dans les firmwares officiels.
 
 ## Ce qui change
 
 `patches/arm_logo.c` remplace le lecteur de parties du fond par un lecteur compatible avec les 34 parties RC5 et cinq parties supplémentaires pour `logo.raw`. Le changement est limité au menu. Le firmware de lecture des disques et ses réglages d'horloge ne sont pas remplacés.
+
+CS02 rouvre le fichier correspondant à chaque bloc demandé. Le préchargement CD peut lire des blocs du logo avant que les dernières lectures du fond soient consommées, même avec `logo=0`. CS01 réutilisait le même fichier FatFs ouvert : les dernières lectures du fond pouvaient alors atteindre la fin de `logo.raw` et renvoyer zéro octet. Le chargeur RC5 acceptait ces réponses et conservait une zone vide. La sélection par bloc empêche cette confusion dans les deux sens ; la taille du fichier et le nombre d’octets lus sont également contrôlés.
 
 `patches/ps1_logo.c` ajoute le chargement optionnel du logo après l'initialisation RC5, puis son dessin dans les deux styles. Le menu RC5 reste compacté en NRV2E et dans la même allocation CD. Le fichier compacté est chargé plus haut en RAM pour éviter qu'il soit écrasé pendant son propre décompactage.
 
@@ -54,7 +56,7 @@ Le lecteur vérifie la taille de `logo.raw` et les résultats de lecture. Une ab
 
 Le nouveau logo occupe une zone VRAM libre : x=768, y=0, 128×20, texture 16 bpp. Les ressources RC5 existantes restent à leurs positions. La transparence partielle est composée avec le fond au chargement ; les pixels entièrement transparents restent transparents. Les pixels noirs opaques restent opaques.
 
-Le début du tas PS1 est déplacé après le code et le tampon ajoutés afin que les allocations de listes/cheats ne les écrasent pas. L'allocateur RC5 original est testé avec cette nouvelle limite. Le libellé de version du menu devient `RC5.CS01`.
+Le début du tas PS1 est déplacé après le code et le tampon ajoutés afin que les allocations de listes/cheats ne les écrasent pas. L'allocateur RC5 original est testé avec cette nouvelle limite. Le libellé de version du menu devient `RC5.CS02`.
 
 ## Formats à la racine de la SD
 
@@ -64,7 +66,7 @@ Le début du tas PS1 est déplacé après le code et le tampon ajoutés afin que
 | `background.raw` | 77312 octets : palette PS1 256×16 bits little endian, bloc gauche 256×240 indices, bloc droit 64×240 indices |
 | `logo.raw` | 10240 octets : RGBA8888, pixels ligne par ligne, 128×20, alpha 0 transparent / 255 opaque |
 
-Le fond est compatible avec la RC5 d'origine. `logo.raw` demande CS01. Le logo n'est pas un TIM ni une texture RGB555 brute malgré son extension `.raw`.
+Le fond est compatible avec la RC5 d'origine. `logo.raw` demande CS01 ou plus récent. Le logo n'est pas un TIM ni une texture RGB555 brute malgré son extension `.raw`.
 
 Réglages par défaut :
 
@@ -100,3 +102,15 @@ GitHub Actions compile et exécute ces vérifications pour les deux cartes avec 
 Ces tests **ne simulent pas toute la console ni le moteur de lecture des jeux**. Le retour utilisateur confirme le démarrage, le lancement des jeux et la personnalisation sur PU18, sans valider toutes les fonctions RC5. La PU8 demande encore un essai matériel. Aucun flashage automatique n’est effectué par les scripts.
 
 Pour revenir à la version de référence, utilise l'UF2 RC5 original ou le fichier reconstruit dont l'empreinte est vérifiée ci-dessus. Conserve aussi les fichiers et réglages de ta SD.
+
+## Diagnostic du fond sur console
+
+Le mode optionnel ci-dessous photographie l’état du chargement au démarrage. Il demande `logo=0` pour observer le dernier paquet du fond. Les trois lignes en haut à droite, à la place du logo, affichent : `R`, CRC32 de la tuile droite en RAM ; `P`, CRC32 du dernier paquet ; `L`, longueur de sa charge utile ; `S`, taille du fichier vue par FatFs ; `F`, position de lecture dans ce fichier. Les nombres sont hexadécimaux.
+
+```sh
+python3 tools/rc5/build.py --board PU18 --diagnostic-background
+.venv/bin/python tests/firmware.py --board PU18 --diagnostic-background
+.venv/bin/python tests/background_diagnostic.py --board PU18
+```
+
+L’UF2 `picostation_PU18_RC5.CS02-background-diagnostic.uf2` et ses rapports sont dans `build-cs/PU18/background-diagnostic-CS02/`. Les informations FatFs passent dans le remplissage inutilisé du dernier paquet, sans changer ses octets d’image. Ce mode sert à vérifier le chargement du fond sur console. Il inclut le correctif CS02 et remplace temporairement le logo par les mesures. Les fichiers de la SD ne sont pas modifiés par le build.

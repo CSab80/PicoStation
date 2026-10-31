@@ -2,7 +2,7 @@
 
 Fork de [megavolt85/PicoStation](https://github.com/megavolt85/PicoStation), pour personnaliser le menu **RC5** : configuration, fond 320×240 et logo 128×20 avec transparence PNG.
 
-La version **RC5.CS01** cible les **PS1 PU18 et PU8, Pico RP2040, sans overclock**. Le démarrage, le lancement des jeux et la personnalisation ont été confirmés par l’utilisateur sur PU18. La variante PU8 reste à tester sur console. Aucun script ne flashe automatiquement le Pico.
+La version **RC5.CS02** cible les **PS1 PU18 et PU8, Pico RP2040, sans overclock**. CS02 corrige un changement de fichier provoqué par le préchargement CD, qui pouvait laisser le coin inférieur droit du fond vide. Le démarrage, les jeux et la personnalisation avaient été confirmés sur PU18 avec CS01 ; les contrôles et l’essai visuel sur console confirment désormais le chargement intégral du fond et la disparition du rectangle avec CS02. La PU8 reste à tester sur console. Aucun script ne flashe automatiquement le Pico.
 
 ## PicoStation Menu Editor
 
@@ -30,7 +30,7 @@ python3 tools/rc5/build.py --board PU18
 python3 tools/rc5/build.py --board PU8
 ```
 
-Chaque build produit une RC5 reconstruite, le firmware CS01 et un rapport dans `build-cs/PU18/` ou `build-cs/PU8/`. Le firmware PU8 est `picostation_PU8_RC5.CS01-experimental.uf2`. Utilise le fichier correspondant à la carte-mère de ta PS1. Sans argument, le build choisit PU18. Consulte [les prérequis, les formats, les tests et les limites](rc5/README.md) avant d’utiliser les fichiers.
+Chaque build produit une RC5 reconstruite, le firmware CS02 et un rapport dans `build-cs/PU18/` ou `build-cs/PU8/`. Le firmware PU8 est `picostation_PU8_RC5.CS02-experimental.uf2`. Utilise le fichier correspondant à la carte-mère de ta PS1. Sans argument, le build choisit PU18. Consulte [les prérequis, les formats, les tests et les limites](rc5/README.md) avant d’utiliser les fichiers.
 
 [GitHub Actions](https://github.com/CSab80/PicoStation/actions/workflows/Bundle.yml) compile et teste les deux cartes séparément ; chaque exécution réussie fournit leurs UF2 dans les artefacts.
 
@@ -40,7 +40,7 @@ Chaque build produit une RC5 reconstruite, le firmware CS01 et un rapport dans `
 |---|---|
 | `config.ini` | Couleurs, style, boutons, activation du fond et du logo |
 | `background.raw` | Fond indexé 320×240, 77312 octets, compatible RC5 |
-| `logo.raw` | RGBA8888 128×20, 10240 octets, nécessite CS01 |
+| `logo.raw` | RGBA8888 128×20, 10240 octets, nécessite CS01 ou plus récent |
 
 Le logo original reste disponible lorsque le logo externe est désactivé, absent ou invalide. Les semi-transparences PNG sont composées avec le fond au chargement.
 

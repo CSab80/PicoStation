@@ -12,13 +12,17 @@ import sys
 from cd import rebuild_sector
 
 ROOT = Path(__file__).resolve().parents[2]
+BUILD_ID = 'CS02'
+VERSION = f'RC5.{BUILD_ID}'
 MANIFEST = json.loads((ROOT/'rc5/original/manifest.json').read_text())
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--board', choices=tuple(MANIFEST['boards']), default='PU18', help='Carte PS1 sans overclock (PU18 par défaut).')
+parser.add_argument('--diagnostic-background', action='store_true', help='Relever le dernier paquet du fond et l’état FatFs sur console (diagnostic séparé).')
 args = parser.parse_args()
 BOARD = args.board
 REFERENCE = MANIFEST['boards'][BOARD]
 OUT = ROOT / 'build-cs' / BOARD
+if args.diagnostic_background: OUT = OUT / f'background-diagnostic-{BUILD_ID}'
 OUT.mkdir(parents=True, exist_ok=True)
 
 def tool(name, alternate=None):
@@ -72,9 +76,11 @@ assert digest(baseline)==REFERENCE['original_uf2_sha256'], 'Baseline does not re
 (OUT/f'picostation_{BOARD}_RC5-reconstruit.uf2').write_bytes(baseline)
 print(f'RC5 {BOARD} reconstruite : identique octet pour octet à l’UF2 de référence.',flush=True)
 
-run(ARMCC,'-mcpu=cortex-m0plus','-mthumb','-Os','-ffreestanding','-fno-builtin','-fno-unwind-tables','-nostdlib','-T','rc5/patches/arm.ld','rc5/patches/arm_logo.c','-o',OUT/'arm_logo.elf')
+arm_defines=['-DCS_BACKGROUND_DIAGNOSTIC'] if args.diagnostic_background else []
+run(ARMCC,'-mcpu=cortex-m0plus','-mthumb','-Os','-ffreestanding','-fno-builtin','-fno-unwind-tables','-nostdlib',*arm_defines,'-T','rc5/patches/arm.ld','rc5/patches/arm_logo.c','-o',OUT/'arm_logo.elf')
 run(COPY,'-O','binary',OUT/'arm_logo.elf',OUT/'arm_logo.bin')
-run(CLANG,*MIPS,'-Os','-ffreestanding','-fno-builtin','-c','rc5/patches/ps1_logo.c','-o',OUT/'ps1_logo.o')
+ps1_source='rc5/patches/ps1_background_diagnostic.c' if args.diagnostic_background else 'rc5/patches/ps1_logo.c'
+run(CLANG,*MIPS,'-Os','-ffreestanding','-fno-builtin','-c',ps1_source,'-o',OUT/'ps1_logo.o')
 run(LLD,'-m','elf32ltsmip','-T','rc5/patches/ps1.ld',OUT/'ps1_logo.o','-o',OUT/'ps1_logo.elf')
 run(LLVMCOPY,'-O','binary',OUT/'ps1_logo.elf',OUT/'ps1_logo.bin')
 syms=symbols(OUT/'ps1_logo.elf')
@@ -98,15 +104,16 @@ heap_start=(syms['image_end']+7)&~7
 assert struct.unpack_from('<I',modified,0x27668)[0]==0x8005bcfc
 struct.pack_into('<I',modified,0x27668,heap_start)
 assert modified[0x14ae4:0x14ae4+16]==b'PicoStation RC5\0'
-modified[0x14ae4:0x14ae4+16]=b'RC5.CS01\0'.ljust(16,b'\0')
-(OUT/'menu-CS01.bin').write_bytes(modified)
+version=f'{VERSION}diag' if args.diagnostic_background else VERSION
+modified[0x14ae4:0x14ae4+16]=(version+'\0').encode().ljust(16,b'\0')
+(OUT/f'menu-{BUILD_ID}.bin').write_bytes(modified)
 
 ucl=ROOT/'third_party/ucl'
 if not (ucl/'src/n2e_99.c').exists(): raise RuntimeError('Initialise le sous-module third_party/ucl.')
 sources=['n2e_99.c','n2e_ds.c','alloc.c','ucl_init.c','ucl_util.c','ucl_ptr.c','ucl_str.c']
 run(CLANG,'-O2','-Wno-tautological-constant-out-of-range-compare','-Ithird_party/ucl/include','-Ithird_party/ucl','-Ithird_party/ucl/src','tools/rc5/ucl_pack.c',*[ucl/'src'/name for name in sources],'-o',OUT/'ucl-pack')
-run(OUT/'ucl-pack',OUT/'menu-CS01.bin',OUT/'menu-CS01.n2e')
-compressed=(OUT/'menu-CS01.n2e').read_bytes()
+run(OUT/'ucl-pack',OUT/f'menu-{BUILD_ID}.bin',OUT/f'menu-{BUILD_ID}.n2e')
+compressed=(OUT/f'menu-{BUILD_ID}.n2e').read_bytes()
 load=0x80100000
 packed=compressed+bytes((-len(compressed))%4)
 decompressor=load+len(packed);packed+=decoder
@@ -119,7 +126,7 @@ packed+=(OUT/'wrapper.bin').read_bytes()
 packed+=bytes((-len(packed))%2048)
 header=bytearray(2048);header[:8]=b'PS-X EXE';struct.pack_into('<4I',header,16,entry,0,load,len(packed))
 exe=header+packed
-(OUT/'menu-CS01.ps-exe').write_bytes(exe)
+(OUT/f'menu-{BUILD_ID}.ps-exe').write_bytes(exe)
 disc_offset=0x12d18
 disc=flash[disc_offset:disc_offset+50*2352]
 sectors=[disc[i:i+2352] for i in range(0,len(disc),2352)]
@@ -154,9 +161,10 @@ new_flash[reader:reader+8]=struct.pack('<2HI',0x4b00,0x4718,0x1003d201)
 assert len(new_flash)==0x3d200
 arm_patch=(OUT/'arm_logo.bin').read_bytes();new_flash+=arm_patch
 result=uf2(new_flash)
-(OUT/f'picostation_{BOARD}_RC5.CS01-experimental.uf2').write_bytes(result)
-(OUT/'firmware-CS01.bin').write_bytes(new_flash)
-report={'version':'RC5.CS01','board':BOARD,'overclocked':False,'baseline_bit_identical':True,'baseline_uf2_sha256':digest(baseline),'cs01_uf2_sha256':digest(result),'cs01_flash_size':len(new_flash),'arm_patch_bytes':len(arm_patch),'ps1_patch_bytes_including_zero_initialized_storage':len(patch),'heap_start':hex(heap_start),'menu_compressed_bytes':len(compressed),'exe_size':len(exe),'exe_capacity':capacity,'packed_load':hex(load),'packed_entry':hex(entry),'unpacker_entry':hex(decompressor),'menu_unpacked_size':len(modified),'menu_unpacked_sha256':digest(modified),'symbols':{k:hex(v) for k,v in syms.items()},'hooks':hooks,'changed_cd_sectors':changed_sectors,'board_reference_patches':REFERENCE['patches_from_pu18'],'arm_changed_ranges':[{'offset':hex(bound),'length':2},{'offset':hex(reader),'length':8},{'offset':'0x3d200','length':len(arm_patch)}],'hardware_validated':False}
+firmware_tag=f'{VERSION}-background-diagnostic' if args.diagnostic_background else f'{VERSION}-experimental'
+(OUT/f'picostation_{BOARD}_{firmware_tag}.uf2').write_bytes(result)
+(OUT/f'firmware-{BUILD_ID}.bin').write_bytes(new_flash)
+report={'build_id':BUILD_ID,'version':version,'diagnostic_background':args.diagnostic_background,'board':BOARD,'overclocked':False,'baseline_bit_identical':True,'baseline_uf2_sha256':digest(baseline),'firmware_uf2_sha256':digest(result),'flash_size':len(new_flash),'arm_patch_bytes':len(arm_patch),'ps1_patch_bytes_including_zero_initialized_storage':len(patch),'heap_start':hex(heap_start),'menu_compressed_bytes':len(compressed),'exe_size':len(exe),'exe_capacity':capacity,'packed_load':hex(load),'packed_entry':hex(entry),'unpacker_entry':hex(decompressor),'menu_unpacked_size':len(modified),'menu_unpacked_sha256':digest(modified),'symbols':{k:hex(v) for k,v in syms.items()},'hooks':hooks,'changed_cd_sectors':changed_sectors,'board_reference_patches':REFERENCE['patches_from_pu18'],'arm_changed_ranges':[{'offset':hex(bound),'length':2},{'offset':hex(reader),'length':8},{'offset':'0x3d200','length':len(arm_patch)}],'hardware_validated':False}
 report['tool_versions']={name:subprocess.check_output([compiler,'--version'],text=True).splitlines()[0] for name,compiler in [('arm_gcc',ARMCC),('clang',CLANG),('lld',LLD)]}
 (OUT/'build-report.json').write_text(json.dumps(report,indent=2)+'\n')
 print(json.dumps(report,indent=2))

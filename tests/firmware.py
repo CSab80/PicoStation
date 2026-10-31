@@ -21,12 +21,16 @@ ROOT=Path(__file__).resolve().parents[1]
 manifest=json.loads((ROOT/'rc5/original/manifest.json').read_text())
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--board',choices=tuple(manifest['boards']),default='PU18')
+parser.add_argument('--diagnostic-background',action='store_true')
 args=parser.parse_args()
 OUT=ROOT/'build-cs'/args.board
+if args.diagnostic_background: OUT=OUT/'background-diagnostic-CS02'
 report=json.loads((OUT/'build-report.json').read_text())
 assert report['board']==args.board and report['overclocked'] is False
-flash=(OUT/'firmware-CS01.bin').read_bytes()
-menu=(OUT/'menu-CS01.bin').read_bytes()
+build_id=report.get('build_id','CS01')
+firmware_sha=report.get('firmware_uf2_sha256',report.get('cs01_uf2_sha256'))
+flash=(OUT/f'firmware-{build_id}.bin').read_bytes()
+menu=(OUT/f'menu-{build_id}.bin').read_bytes()
 syms={key:int(value,16) for key,value in report['symbols'].items()}
 checks=[]
 
@@ -50,7 +54,7 @@ for hook in report['hooks']:
 assert all(a==b or i in ps1_allowed for i,(a,b) in enumerate(zip(original_menu,menu)))
 
 # Execute the actual relocated entry wrapper and original unpacker.
-exe=(OUT/'menu-CS01.ps-exe').read_bytes()
+exe=(OUT/f'menu-{build_id}.ps-exe').read_bytes()
 entry,_,load,length=struct.unpack_from('<4I',exe,16)
 emu=Uc(UC_ARCH_MIPS,UC_MODE_MIPS32|UC_MODE_LITTLE_ENDIAN)
 emu.mem_map(0,0x200000);emu.mem_map(0x1f801000,0x1000)
@@ -106,6 +110,7 @@ class SD:
         self.current='background.raw' if 'background.raw' in self.files else None;self.cursor=0
         self.write32(0x2000a410,1 if self.current else 0)
         self.uc.mem_write(0x2000a420,struct.pack('<Q',len(self.files[self.current]) if self.current else 0))
+        self.uc.mem_write(0x2000a448,struct.pack('<Q',0))
     def hook(self,uc,address,size,data):
         result=0
         if address==0x20007630:
@@ -117,12 +122,16 @@ class SD:
             uc.mem_write(0x2000a420,struct.pack('<Q',len(self.files[self.current]) if self.current else 0))
             result=0 if self.current else 4
         elif address==0x20007664:
-            self.cursor=self.r(UC_ARM_REG_R2)|(self.r(UC_ARM_REG_R3)<<32)
+            requested=self.r(UC_ARM_REG_R2)|(self.r(UC_ARM_REG_R3)<<32)
+            self.cursor=min(requested,len(self.files.get(self.current,b'')))
+            uc.mem_write(0x2000a448,struct.pack('<Q',self.cursor))
             result=int(self.failure=='seek')
         elif address==0x200070d4:
             content=self.files.get(self.current,b'')[self.cursor:self.cursor+self.r(UC_ARM_REG_R2)]
+            if self.failure=='short':content=content[:-1]
             if content:uc.mem_write(self.r(UC_ARM_REG_R1),content)
             self.write32(self.r(UC_ARM_REG_R3),len(content));self.cursor+=len(content)
+            uc.mem_write(0x2000a448,struct.pack('<Q',self.cursor))
             result=int(self.failure=='read')
         else:return
         uc.reg_write(UC_ARM_REG_R0,result);uc.reg_write(UC_ARM_REG_PC,self.r(UC_ARM_REG_LR))
@@ -141,22 +150,39 @@ assembled=bytearray()
 for part in range(34):
     packet=sd.read(part);assert packet[:4]==b'PART';index,n=struct.unpack_from('<2H',packet,4);assert index==part;assembled+=packet[8:8+n]
 assert assembled==bg
+if args.diagnostic_background:
+    assert struct.unpack_from('<5I',packet,2000)==(0x31444742,77312,0,77312,0)
 assembled=bytearray()
 for part in range(34,39):
     packet=sd.read(part);index,n=struct.unpack_from('<2H',packet,4);assert packet[:4]==b'PART' and index==part;assembled+=packet[8:8+n]
 assert assembled==rgba
+for part in (30,34,31,35,32,36,33,37,0,38,34,1,35):
+    packet=sd.read(part)
+    source=rgba if part>=34 else bg
+    offset=(part-34 if part>=34 else part)*2316
+    expected=source[offset:offset+2316]
+    assert packet[:4]==b'PART' and struct.unpack_from('<HH',packet,4)==(part,len(expected))
+    assert packet[8:8+len(expected)]==expected
+checks.append('CD read-ahead regression: interleaved wallpaper/logo chunks reopen the correct asset, including wallpaper parts 31..33 after logo prefetch')
 assert sd.read(34)==sd.read(34) # restart is idempotent
 assert sd.read(39)[:4]==b'DEAD'
 for files in ({},{'logo.raw':b'x'*10239},{'logo.raw':b'x'*10241}):
     invalid=SD(files);invalid.reset();assert invalid.read(34)[:4]==b'DEAD'
-for failure in ('seek','read'):
+for size in (0,71796,77311,77313):
+    invalid=SD({'background.raw':bytes(size),'logo.raw':rgba});invalid.reset()
+    assert invalid.read(31)[:4]==b'DEAD'
+    assert invalid.read(34)[8:8+2316]==rgba[:2316]
+invalid=SD({'background.raw':bg});invalid.reset();invalid.uc.mem_write(0x20033401,b'\0')
+assert invalid.read(0)[:4]==b'DEAD'
+for failure in ('seek','read','short'):
     invalid=SD({'logo.raw':rgba});invalid.reset();invalid.failure=failure;assert invalid.read(34)[:4]==b'DEAD'
-checks.append('compiled ARM reader: original background, all RGBA parts, missing/invalid files, I/O failures, restart')
+checks.append('compiled ARM reader: full wallpaper/RGBA, strict sizes and read lengths, missing SD/files, I/O failures, restart')
 
 class PS1:
-    def __init__(self,files,wallpaper=False,classic=False,logo_key='1',bad_packet=False):
-        self.sd=SD(files);self.sd.reset();self.upload=None;self.commands=[];self.bad_packet=bad_packet;self.packet_calls=0
-        self.uc=Uc(UC_ARCH_MIPS,UC_MODE_MIPS32|UC_MODE_LITTLE_ENDIAN);self.uc.mem_map(0,0x200000)
+    def __init__(self,files,wallpaper=False,classic=False,logo_key='1',bad_packet=False,prefetch=False):
+        self.prefetch=prefetch
+        self.sd=SD(files);self.sd.reset();self.upload=None;self.gpu_uploads=[];self.commands=[];self.bad_packet=bad_packet;self.packet_calls=0
+        self.uc=Uc(UC_ARCH_MIPS,UC_MODE_MIPS32|UC_MODE_LITTLE_ENDIAN);self.uc.mem_map(0,0x200000);self.uc.mem_map(0x1f801000,0x1000)
         self.uc.mem_write(0x10000,menu);self.uc.reg_write(UC_MIPS_REG_GP,0x8003f5d0)
         self.uc.mem_write(0x51190,struct.pack('<2B4H',0,0,128,20,11,0x52e))
         self.uc.mem_write(0x37678,bytes([int(wallpaper)]))
@@ -177,23 +203,30 @@ class PS1:
             if pair==(8,8):self.sd.reset()
             self.ret()
         elif address==0x8001d34c:
-            part=self.r(UC_MIPS_REG_A0)-300;packet=self.sd.read(part);self.packet_calls+=1
+            part=self.r(UC_MIPS_REG_A0)-300
+            if self.prefetch and part==31:self.sd.read(34)
+            if self.prefetch and part==35:self.sd.read(0)
+            packet=self.sd.read(part);self.packet_calls+=1
             if self.bad_packet:packet=b'NOPE'+packet[4:]
             uc.mem_write(self.r(UC_MIPS_REG_A1)&0x1fffffff,bytes(12)+packet+bytes(4));self.ret()
         elif address==0x80010474:
             ptr=self.r(UC_MIPS_REG_A0);assert ptr%4==0,'GPU DMA pointer is not aligned'
-            assert (self.r(UC_MIPS_REG_A1),self.r(UC_MIPS_REG_A2),self.r(UC_MIPS_REG_A3))==(768,0,128)
-            height=struct.unpack('<I',uc.mem_read((self.r(UC_MIPS_REG_SP)&0x1fffffff)+16,4))[0];assert height==20
-            self.upload=bytes(uc.mem_read(ptr&0x1fffffff,5120));self.ret()
+            x,y,width=[self.r(reg) for reg in (UC_MIPS_REG_A1,UC_MIPS_REG_A2,UC_MIPS_REG_A3)]
+            height=struct.unpack('<I',uc.mem_read((self.r(UC_MIPS_REG_SP)&0x1fffffff)+16,4))[0]
+            content=bytes(uc.mem_read(ptr&0x1fffffff,width*height*2))
+            self.gpu_uploads.append((x,y,width,height,content))
+            if (x,y,width,height)==(768,0,128,20):self.upload=content
+            self.ret()
         elif address==0x80010398:self.ret()
         elif address==0x80010668:self.ret(0x80090000)
     def call(self,name,args=()):
         self.uc.reg_write(UC_MIPS_REG_SP,0x801fff00);self.uc.reg_write(UC_MIPS_REG_RA,0x801f0000)
         for reg,value in zip((UC_MIPS_REG_A0,UC_MIPS_REG_A1,UC_MIPS_REG_A2,UC_MIPS_REG_A3),args):self.uc.reg_write(reg,value)
-        self.uc.emu_start(syms[name],0x801f0000,timeout=5_000_000,count=4000000)
+        for i,value in enumerate(args[4:]):self.uc.mem_write(0x1fff10+i*4,struct.pack('<I',value))
+        self.uc.emu_start(syms[name] if isinstance(name,str) else name,0x801f0000,timeout=5_000_000,count=4000000)
         assert self.r(UC_MIPS_REG_PC)==0x801f0000
     def init(self):self.call('cs_load_config');self.call('cs_init',(0,))
-    def draw(self):self.call('cs_draw_logo',(0,185,14));return struct.unpack('<5I',self.uc.mem_read(0x90000,20))
+    def draw(self):self.call('cs_logo_draw' if args.diagnostic_background else 'cs_draw_logo',(0,185,14));return struct.unpack('<5I',self.uc.mem_read(0x90000,20))
 
 for wallpaper in (False,True):
     for classic in (False,True):
@@ -213,8 +246,19 @@ if archive.exists():
         assert z.testzip() is None
         raw=z.read('background.raw');logo=z.read('logo.raw')
     for classic in (False,True):
-        ps=PS1({'background.raw':raw,'logo.raw':logo},wallpaper=True,classic=classic)
-        ps.uc.mem_write(0x3e384,raw);ps.init();assert ps.upload is not None
+        ps=PS1({'background.raw':raw,'logo.raw':logo},wallpaper=True,classic=classic,prefetch=True)
+        # Execute the real RC5 background loader and both texture upload helpers.
+        ps.call(0x80015b3c)
+        assert bytes(ps.uc.mem_read(0x3e384,len(raw)))==raw
+        if args.diagnostic_background:
+            # Snapshot a real compiled ARM reply after the CD header was added.
+            ps.call('cs_init',(0,))
+            label=bytes(ps.uc.mem_read(syms['file_label']&0x1fffffff,20)).split(b'\0')[0]
+            assert label==b'S00012E00 F00012E00',label
+        ps.call(0x8001077c,(0x800511a8,0x8003e584,0x8003e384,256,256,256,496,256,240,1))
+        ps.call(0x80010b24,(0x800511b2,0x800511a8,0x8004d584,512,256,64,240,1))
+        assert ps.gpu_uploads==[(256,256,128,240,raw[512:61952]),(256,496,256,1,raw[:512]),(512,256,32,240,raw[61952:])]
+        ps.init();assert ps.upload is not None
         pixels=struct.unpack('<2560H',ps.upload);palette=struct.unpack('<256H',raw[:512])
         for i,pixel in enumerate(pixels):
             x=(100 if classic else 185)+i%128;y=(10 if classic else 14)+i//128
@@ -228,7 +272,8 @@ if archive.exists():
                     expected|=(channel>>3)<<(c*5)
             assert pixel==expected,(classic,i,hex(pixel),hex(expected))
     checks.append('JavaScript editor ZIP decoded by compiled ARM/MIPS code: every pixel, both styles and tile boundary')
+    checks.append('real RC5 wallpaper loader and upload helpers preserve all 77312 bytes including the lower-right tile through the GPU transfer boundary')
 
-result={'board':args.board,'checks':checks,'hardware_validated':False,'firmware_sha256':report['cs01_uf2_sha256']}
+result={'board':args.board,'checks':checks,'hardware_validated':False,'firmware_sha256':firmware_sha}
 (OUT/'firmware-tests.json').write_text(json.dumps(result,indent=2)+'\n')
 print(json.dumps(result,indent=2))
