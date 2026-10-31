@@ -4,6 +4,7 @@
 The original drive engine and PS1 hardware are NOT emulated by these tests.
 """
 from pathlib import Path
+import argparse
 import hashlib
 import json
 import struct
@@ -17,16 +18,22 @@ from unicorn.arm_const import *
 from unicorn.mips_const import *
 
 ROOT=Path(__file__).resolve().parents[1]
-OUT=ROOT/'build-cs'
+manifest=json.loads((ROOT/'rc5/original/manifest.json').read_text())
+parser=argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--board',choices=tuple(manifest['boards']),default='PU18')
+args=parser.parse_args()
+OUT=ROOT/'build-cs'/args.board
 report=json.loads((OUT/'build-report.json').read_text())
+assert report['board']==args.board and report['overclocked'] is False
 flash=(OUT/'firmware-CS01.bin').read_bytes()
 menu=(OUT/'menu-CS01.bin').read_bytes()
 syms={key:int(value,16) for key,value in report['symbols'].items()}
 checks=[]
 
-baseline=(OUT/'picostation_PU18_RC5-reconstruit.uf2').read_bytes()
-assert hashlib.sha256(baseline).hexdigest()=='31e0231d8abc243bec6c8a788d3d027f3af97354ae48edacb79aa1acb498b702'
-original=(OUT/'pu18_rc5.bin').read_bytes()
+baseline=(OUT/f'picostation_{args.board}_RC5-reconstruit.uf2').read_bytes()
+assert hashlib.sha256(baseline).hexdigest()==manifest['boards'][args.board]['original_uf2_sha256']
+original=(OUT/'reference-flash.bin').read_bytes()
+assert hashlib.sha256(original).hexdigest()==manifest['boards'][args.board]['flash_sha256']
 allowed=set(range(0x12d18,0x12d18+117600))|set(range(0x3553e,0x35540))|set(range(0x36fac,0x36fb4))
 assert all(a==b or i in allowed for i,(a,b) in enumerate(zip(original,flash)))
 for image in (original,flash):
@@ -200,7 +207,7 @@ for files,logo_key,bad in [({},'1',False),({'logo.raw':b'x'},'1',False),({'logo.
     if bad:assert ps.packet_calls==20
 checks.append('compiled MIPS client + compiled ARM reader: both styles, flat/wallpaper backgrounds, exact alpha/black, DMA alignment, fallback/retry/disable')
 
-archive=OUT/'editor-test-export.zip'
+archive=ROOT/'build-cs/editor-test-export.zip'
 if archive.exists():
     with ZipFile(archive) as z:
         assert z.testzip() is None
@@ -222,6 +229,6 @@ if archive.exists():
             assert pixel==expected,(classic,i,hex(pixel),hex(expected))
     checks.append('JavaScript editor ZIP decoded by compiled ARM/MIPS code: every pixel, both styles and tile boundary')
 
-result={'checks':checks,'hardware_validated':False,'firmware_sha256':report['cs01_uf2_sha256']}
+result={'board':args.board,'checks':checks,'hardware_validated':False,'firmware_sha256':report['cs01_uf2_sha256']}
 (OUT/'firmware-tests.json').write_text(json.dumps(result,indent=2)+'\n')
 print(json.dumps(result,indent=2))

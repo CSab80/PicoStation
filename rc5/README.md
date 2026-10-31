@@ -1,6 +1,6 @@
-# RC5 PU18 et extension CS01
+# RC5 PU18 / PU8 et extension CS01
 
-Cette première version cible exclusivement **la carte PS1 PU18, Pico RP2040, sans overclock**. Aucune variante PU8, overclockée ou Pico 2 n'est produite par cette chaîne.
+Cette chaîne cible les cartes PS1 **PU18 et PU8, Pico RP2040, sans overclock**. Aucune variante overclockée ou Pico 2 n’est produite. Le démarrage, les jeux et la personnalisation ont été confirmés par l’utilisateur sur PU18 ; la PU8 reste expérimentale et à vérifier sur console.
 
 ## Nature de la reconstruction
 
@@ -8,12 +8,19 @@ Les sources publiques de janvier 2026 ne permettent pas de reconstruire la RC5 p
 
 Les fichiers `original/*.S` sont une représentation assembleur des données et du code machine récupérés. Ils contiennent des directives de données avec les positions d'origine. **Ils ne sont pas les sources C/C++ originales retrouvées, ni une réécriture intégrale de la RC5 en C/C++.** Les sources originales non publiées restent indisponibles.
 
-L'assemblage de cette base reproduit exactement l'UF2 de référence :
+L’assemblage et la sélection de carte reproduisent exactement chaque UF2 officiel de référence :
 
 ```text
 SHA-256 31e0231d8abc243bec6c8a788d3d027f3af97354ae48edacb79aa1acb498b702
 500736 octets — picostation_PU18.uf2, RC5 officielle
+
+SHA-256 6df7b93ba5dbc82b4e350955607f3c1e644fdf386b12607a8bdb45120a099e9c
+500736 octets — picostation_PU8.uf2, RC5 officielle
 ```
+
+Les deux images officielles sans overclock ne diffèrent que par deux octets dans la flash : `0x3cb18` (`3f` → `43`) et `0x3cb22` (`20` → `22`). `original/manifest.json` conserve ces différences, les valeurs attendues et les empreintes de chaque carte. La base PU18 est assemblée, puis ces différences sont appliquées pour PU8 avant vérification de son empreinte officielle. Il n’est pas nécessaire de dupliquer l’image assembleur complète. Le disque du menu et les adresses de l’extension sont identiques sur les deux cartes.
+
+Référence : [release RC5 officielle](https://github.com/megavolt85/PicoStation/releases/tag/RC5), archive `picostation_pico1_RC5.7z`, SHA-256 `71ae613d9c875313e6e9e2e970f81edc3942d712f396a150c3336a70c079b81a`.
 
 Les fonctions RC5 de lecture des jeux, cartes mémoire, jaquettes, cheats, options, configuration et rendu sont conservées dans cette base. Leur présence et la conservation du code ne remplacent pas un essai de fonctionnement sur console.
 
@@ -23,16 +30,19 @@ Outils requis : Python 3.10+, GNU Arm Embedded (`arm-none-eabi-gcc`, `arm-none-e
 
 ```sh
 git submodule update --init third_party/ucl
-python3 tools/rc5/build.py
+python3 tools/rc5/build.py --board PU18
+python3 tools/rc5/build.py --board PU8
 ```
 
 Le script trouve les outils dans le PATH ou dans leurs installations Homebrew habituelles. Le compresseur UCL est construit pour l'ordinateur ; il n'est pas ajouté au firmware. Son sous-module est fixé au commit `d72326a913206ddf73d756feafff2d2dd42a733a`.
 
-Résultats dans `build-cs/` :
+La carte choisie est PU18 si l’argument `--board` est absent. Les fichiers de chaque carte sont isolés dans `build-cs/PU18/` ou `build-cs/PU8/` :
 
-- `picostation_PU18_RC5-reconstruit.uf2` : référence reconstruite et vérifiée identique à la RC5.
-- `picostation_PU18_RC5.CS01-experimental.uf2` : extension CS01, **non validée sur console**.
+- `picostation_<CARTE>_RC5-reconstruit.uf2` : référence reconstruite et vérifiée identique à la RC5 de cette carte.
+- `picostation_<CARTE>_RC5.CS01-experimental.uf2` : extension CS01 de cette carte.
 - `build-report.json` : empreintes, adresses des modifications, tailles et paramètres du build.
+
+Les fichiers déjà produits par l’ancienne chaîne à la racine de `build-cs/` ne sont pas supprimés ; les nouveaux résultats sont dans les sous-dossiers par carte. Le code C de personnalisation et les fichiers SD sont communs aux deux cartes. La recompilation PU18 avec les mêmes outils conserve exactement le firmware CS01 déjà testé.
 
 ## Ce qui change
 
@@ -78,12 +88,15 @@ logo=0
 ```sh
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python tests/firmware.py
 node tools/test_editor.mjs
+.venv/bin/python tests/firmware.py --board PU18
+.venv/bin/python tests/firmware.py --board PU8
 ```
 
 Les essais exécutent le vrai code compilé ARM et MIPS. Les accès SD, le BIOS et les transferts GPU sont simulés aux interfaces. Ils vérifient le décompactage réel, le retour à l'entrée du menu RC5, le transport du fond, les cinq parties du logo, les tailles invalides, les erreurs de lecture, l'alpha, le noir opaque, les deux styles, l'alignement DMA et le repli sur le logo embarqué. Les EDC/ECC du disque embarqué sont contrôlés. Les octets modifiés sont bornés et comparés à la base.
 
-Ces tests **ne simulent pas toute la console ni le moteur de lecture des jeux**. Le démarrage sur PS1, les changements de jeux, les cartes mémoire, le son, les cheats et les options demandent encore une validation matérielle de CS01. Aucun flashage automatique n'est effectué par les scripts.
+GitHub Actions compile et exécute ces vérifications pour les deux cartes avec une matrice PU18/PU8 et publie un artefact par carte. Les rapports automatiques conservent `hardware_validated=false` : une simulation ne constitue pas une validation matérielle.
+
+Ces tests **ne simulent pas toute la console ni le moteur de lecture des jeux**. Le retour utilisateur confirme le démarrage, le lancement des jeux et la personnalisation sur PU18, sans valider toutes les fonctions RC5. La PU8 demande encore un essai matériel. Aucun flashage automatique n’est effectué par les scripts.
 
 Pour revenir à la version de référence, utilise l'UF2 RC5 original ou le fichier reconstruit dont l'empreinte est vérifiée ci-dessus. Conserve aussi les fichiers et réglages de ta SD.

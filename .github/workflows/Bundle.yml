@@ -1,4 +1,4 @@
-name: Construire et vérifier RC5.CS01 PU18
+name: Construire et vérifier RC5.CS01 PU18 et PU8
 
 on:
   push:
@@ -10,8 +10,13 @@ permissions:
   contents: read
 
 jobs:
-  pu18:
+  firmware:
+    name: RC5.CS01 ${{ matrix.board }} sans overclock
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        board: [PU18, PU8]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -27,7 +32,7 @@ jobs:
           git submodule update --init third_party/ucl
           python -m pip install -r requirements-dev.txt
       - name: Reconstruire RC5 et compiler CS01
-        run: python tools/rc5/build.py
+        run: python tools/rc5/build.py --board ${{ matrix.board }}
       - name: Vérifier les formats de l’éditeur
         run: |
           node tools/test_editor.mjs
@@ -40,12 +45,14 @@ jobs:
               assert len(archive.read('logo.raw')) == 10240
           PYTHON
       - name: Exécuter le code ARM et MIPS en simulation
-        run: python tests/firmware.py
+        run: python tests/firmware.py --board ${{ matrix.board }}
       - name: Publier les artefacts de vérification
         uses: actions/upload-artifact@v4
         with:
-          name: PicoStation-PU18-RC5.CS01-experimental
+          name: PicoStation-${{ matrix.board }}-RC5.CS01-experimental
+          if-no-files-found: error
           path: |
-            build-cs/*.uf2
-            build-cs/*report.json
-            build-cs/*tests.json
+            build-cs/${{ matrix.board }}/*.uf2
+            build-cs/${{ matrix.board }}/*report.json
+            build-cs/${{ matrix.board }}/*tests.json
+            build-cs/editor-tests.json

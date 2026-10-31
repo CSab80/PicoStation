@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Rebuild verified RC5 PU18, then compile the source-level CS logo extension."""
+"""Rebuild verified RC5 PU18/PU8, then compile the shared CS logo extension."""
 from pathlib import Path
+import argparse
 import hashlib
 import json
 import os
@@ -11,9 +12,14 @@ import sys
 from cd import rebuild_sector
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / 'build-cs'
-OUT.mkdir(exist_ok=True)
 MANIFEST = json.loads((ROOT/'rc5/original/manifest.json').read_text())
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--board', choices=tuple(MANIFEST['boards']), default='PU18', help='Carte PS1 sans overclock (PU18 par défaut).')
+args = parser.parse_args()
+BOARD = args.board
+REFERENCE = MANIFEST['boards'][BOARD]
+OUT = ROOT / 'build-cs' / BOARD
+OUT.mkdir(parents=True, exist_ok=True)
 
 def tool(name, alternate=None):
     result = shutil.which(name)
@@ -52,10 +58,19 @@ def uf2(image):
 
 flash=assemble('pu18_rc5');menu=assemble('menu_rc5');decoder=assemble('unpacker')
 assert digest(flash)==MANIFEST['flash_sha256'] and digest(menu)==MANIFEST['menu_sha256']
+flash=bytearray(flash)
+for change in REFERENCE['patches_from_pu18']:
+    offset=int(change['offset'],16)
+    expected=bytes.fromhex(change['expected']);replacement=bytes.fromhex(change['replacement'])
+    assert len(expected)==len(replacement) and flash[offset:offset+len(expected)]==expected, 'Unexpected board reference bytes'
+    flash[offset:offset+len(expected)]=replacement
+flash=bytes(flash)
+assert digest(flash)==REFERENCE['flash_sha256'], f'{BOARD} flash does not match official RC5'
+(OUT/'reference-flash.bin').write_bytes(flash)
 baseline=uf2(flash)
-assert digest(baseline)==MANIFEST['original_uf2_sha256'], 'Baseline does not reproduce original UF2'
-(OUT/'picostation_PU18_RC5-reconstruit.uf2').write_bytes(baseline)
-print('RC5 reconstruite : identique octet pour octet à l’UF2 de référence.',flush=True)
+assert digest(baseline)==REFERENCE['original_uf2_sha256'], 'Baseline does not reproduce original UF2'
+(OUT/f'picostation_{BOARD}_RC5-reconstruit.uf2').write_bytes(baseline)
+print(f'RC5 {BOARD} reconstruite : identique octet pour octet à l’UF2 de référence.',flush=True)
 
 run(ARMCC,'-mcpu=cortex-m0plus','-mthumb','-Os','-ffreestanding','-fno-builtin','-fno-unwind-tables','-nostdlib','-T','rc5/patches/arm.ld','rc5/patches/arm_logo.c','-o',OUT/'arm_logo.elf')
 run(COPY,'-O','binary',OUT/'arm_logo.elf',OUT/'arm_logo.bin')
@@ -139,9 +154,9 @@ new_flash[reader:reader+8]=struct.pack('<2HI',0x4b00,0x4718,0x1003d201)
 assert len(new_flash)==0x3d200
 arm_patch=(OUT/'arm_logo.bin').read_bytes();new_flash+=arm_patch
 result=uf2(new_flash)
-(OUT/'picostation_PU18_RC5.CS01-experimental.uf2').write_bytes(result)
+(OUT/f'picostation_{BOARD}_RC5.CS01-experimental.uf2').write_bytes(result)
 (OUT/'firmware-CS01.bin').write_bytes(new_flash)
-report={'version':'RC5.CS01','board':'PU18','overclocked':False,'baseline_bit_identical':True,'baseline_uf2_sha256':digest(baseline),'cs01_uf2_sha256':digest(result),'cs01_flash_size':len(new_flash),'arm_patch_bytes':len(arm_patch),'ps1_patch_bytes_including_zero_initialized_storage':len(patch),'heap_start':hex(heap_start),'menu_compressed_bytes':len(compressed),'exe_size':len(exe),'exe_capacity':capacity,'packed_load':hex(load),'packed_entry':hex(entry),'unpacker_entry':hex(decompressor),'menu_unpacked_size':len(modified),'menu_unpacked_sha256':digest(modified),'symbols':{k:hex(v) for k,v in syms.items()},'hooks':hooks,'changed_cd_sectors':changed_sectors,'arm_changed_ranges':[{'offset':hex(bound),'length':2},{'offset':hex(reader),'length':8},{'offset':'0x3d200','length':len(arm_patch)}],'hardware_validated':False}
+report={'version':'RC5.CS01','board':BOARD,'overclocked':False,'baseline_bit_identical':True,'baseline_uf2_sha256':digest(baseline),'cs01_uf2_sha256':digest(result),'cs01_flash_size':len(new_flash),'arm_patch_bytes':len(arm_patch),'ps1_patch_bytes_including_zero_initialized_storage':len(patch),'heap_start':hex(heap_start),'menu_compressed_bytes':len(compressed),'exe_size':len(exe),'exe_capacity':capacity,'packed_load':hex(load),'packed_entry':hex(entry),'unpacker_entry':hex(decompressor),'menu_unpacked_size':len(modified),'menu_unpacked_sha256':digest(modified),'symbols':{k:hex(v) for k,v in syms.items()},'hooks':hooks,'changed_cd_sectors':changed_sectors,'board_reference_patches':REFERENCE['patches_from_pu18'],'arm_changed_ranges':[{'offset':hex(bound),'length':2},{'offset':hex(reader),'length':8},{'offset':'0x3d200','length':len(arm_patch)}],'hardware_validated':False}
 report['tool_versions']={name:subprocess.check_output([compiler,'--version'],text=True).splitlines()[0] for name,compiler in [('arm_gcc',ARMCC),('clang',CLANG),('lld',LLD)]}
 (OUT/'build-report.json').write_text(json.dumps(report,indent=2)+'\n')
 print(json.dumps(report,indent=2))

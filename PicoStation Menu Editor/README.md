@@ -18,4 +18,4 @@ Les réglages sont mémorisés localement dans le navigateur. Les images restent
 
 Le ZIP contient directement les fichiers à la racine, sans dossier intermédiaire. Son extraction doit remplacer les anciens fichiers concernés. La case du logo génère `logo=0/1`, pour pouvoir désactiver un ancien `logo.raw` encore présent sur la SD.
 
-Le fond fonctionne avec RC5 ; le logo externe nécessite RC5.CS01. L'aperçu reproduit les dimensions, placements, couleurs converties et composition du logo. La jaquette affichée est un exemple ; l'aperçu n'est pas une émulation complète du GPU PS1.
+Le fond fonctionne avec RC5 ; le logo externe nécessite RC5.CS01. Les fichiers SD sont identiques pour PU18 et PU8 ; seul l’UF2 à installer dépend de la carte-mère. L'aperçu reproduit les dimensions, placements, couleurs converties et composition du logo. La jaquette affichée est un exemple ; l'aperçu n'est pas une émulation complète du GPU PS1.
