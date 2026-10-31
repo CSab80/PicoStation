@@ -1,0 +1,19 @@
+PicoStation CS
+
+Fork of megavolt85/PicoStation, itself derived from Team-Resurgent/PicoStation
+and paulocode/picostation. Existing copyright and license notices are retained.
+
+The RC5 reference machine-level representation and menu image resources were
+recovered from the publicly released PU18 non-overclocked RC5 firmware provided
+for this project. They are identified as recovered material, not newly authored
+original RC5 C/C++ source.
+
+The menu builds on spicyjpeg/ps1-bare-metal and the PSXProject contributors.
+Existing upstream source files carry their own notices. Font and default logo
+resources in PicoStation Menu Editor/assets originate from the RC5 menu.
+
+The host-side UCL compressor is Copyright Markus F.X.J. Oberhumer and licensed
+under GPL-2.0-or-later. Its complete source and license are supplied by the
+pinned third_party/ucl Git submodule. It is a host build tool.
+
+New CS extension and editor code: Apache-2.0, except where otherwise noted.

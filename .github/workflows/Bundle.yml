@@ -1,80 +1,51 @@
-name: Bundle PicoStation
+name: Construire et vérifier RC5.CS01 PU18
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [main]
   pull_request:
-    branches: [ "main" ]
-    
   workflow_dispatch:
-  
-jobs:
-  build:
-  
-    runs-on: ubuntu-latest
 
+permissions:
+  contents: read
+
+jobs:
+  pu18:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          submodules: recursive
-
-      - name: Install Dependancies
-        run: sudo apt install cmake gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
-
-      - name: Get Pico SDK
-        run: git clone --branch 2.1.1 --recurse-submodules https://github.com/raspberrypi/pico-sdk.git
-
-      - name: Create Build Folder
-        run: |
-          mkdir build
-          mkdir output
-
-      - name: Build PicoStation Pico1
-        run: |
-          cd ${{ github.workspace }}/build
-          rm -fr ./*
-          cmake -DPICO_SDK_PATH=${{ github.workspace }}/pico-sdk -DPICOSTATION_VARIANT=picostation_pico1 .. 
-          cmake --build .
-          cp ${{ github.workspace }}/build/picostation_pico1.uf2 ${{ github.workspace }}/output/picostation_pico1.uf2
-
-      - name: Build PicoStation Pico2
-        run: |
-          cd ${{ github.workspace }}/build
-          rm -fr ./*
-          cmake -DPICO_SDK_PATH=${{ github.workspace }}/pico-sdk -DPICOSTATION_VARIANT=picostation_pico2 .. 
-          cmake --build .
-          cp ${{ github.workspace }}/build/picostation_pico2.uf2 ${{ github.workspace }}/output/picostation_pico2.uf2
-
-      - name: Build PicoStation Plus Pico1
-        run: |
-          cd ${{ github.workspace }}/build
-          rm -fr ./*
-          cmake -DPICO_SDK_PATH=${{ github.workspace }}/pico-sdk -DPICOSTATION_VARIANT=picostation_plus_pico1 .. 
-          cmake --build .
-          cp ${{ github.workspace }}/build/picostation_plus_pico1.uf2 ${{ github.workspace }}/output/picostation_plus_pico1.uf2
-
-      - name: Build PicoStation Plus Pico2
-        run: |
-          cd ${{ github.workspace }}/build
-          rm -fr ./*
-          cmake -DPICO_SDK_PATH=${{ github.workspace }}/pico-sdk -DPICOSTATION_VARIANT=picostation_plus_pico2 .. 
-          cmake --build .
-          cp ${{ github.workspace }}/build/picostation_plus_pico2.uf2 ${{ github.workspace }}/output/picostation_plus_pico2.uf2
-
-      - name: List Files
-        run: ls ${{ github.workspace }}/build
-
-      - name: Create Draft Release
-        uses: softprops/action-gh-release@v2.2.2
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
         with:
-          tag_name: latest
-          draft: true
-          files: |
-            ${{ github.workspace }}/output/*.uf2
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2.2.2
-        if: startsWith(github.ref, 'refs/tags/')
+          node-version: '22'
+      - name: Installer les outils de compilation
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi binutils-arm-none-eabi clang lld llvm
+          git submodule update --init third_party/ucl
+          python -m pip install -r requirements-dev.txt
+      - name: Reconstruire RC5 et compiler CS01
+        run: python tools/rc5/build.py
+      - name: Vérifier les formats de l’éditeur
+        run: |
+          node tools/test_editor.mjs
+          python - <<'PYTHON'
+          import zipfile
+          with zipfile.ZipFile('build-cs/editor-test-export.zip') as archive:
+              assert archive.testzip() is None
+              assert set(archive.namelist()) == {'config.ini', 'background.raw', 'logo.raw'}
+              assert len(archive.read('background.raw')) == 77312
+              assert len(archive.read('logo.raw')) == 10240
+          PYTHON
+      - name: Exécuter le code ARM et MIPS en simulation
+        run: python tests/firmware.py
+      - name: Publier les artefacts de vérification
+        uses: actions/upload-artifact@v4
         with:
-          files: |
-            ${{ github.workspace }}/output/*.uf2
+          name: PicoStation-PU18-RC5.CS01-experimental
+          path: |
+            build-cs/*.uf2
+            build-cs/*report.json
+            build-cs/*tests.json

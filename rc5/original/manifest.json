@@ -1,0 +1,10 @@
+{
+  "board": "PU18",
+  "overclocked": false,
+  "original_uf2_sha256": "31e0231d8abc243bec6c8a788d3d027f3af97354ae48edacb79aa1acb498b702",
+  "flash_sha256": "442e84237f2611e27c28257233dd1fc2c10cfd959ecfdf82ef207d1b0a26d28e",
+  "menu_sha256": "472f033ab2a3e0ee8018166013aa16424c841139c3d4585668a2f86da49436cd",
+  "unpacker_size": 340,
+  "upstream": "https://github.com/megavolt85/PicoStation/releases/tag/RC5",
+  "recovery": "Lossless assembly data directives recovered from supplied firmware; not original C/C++ sources."
+}

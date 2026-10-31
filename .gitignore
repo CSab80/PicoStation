@@ -50,3 +50,7 @@ Thumbs.db
 *.wmv
 
 .vscode/
+# PicoStation CS generated outputs and local environments
+build-cs/
+.venv/
+__pycache__/
