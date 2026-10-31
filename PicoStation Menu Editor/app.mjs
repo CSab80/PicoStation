@@ -61,7 +61,7 @@ $('save-config').addEventListener('click',()=>{download(makeConfig(config,extra)
 $('download').addEventListener('click',()=>{const files=[['config.ini',makeConfig(config,extra)]];if(config.wallpaper&&background)files.push(['background.raw',background.raw]);if(config.logo&&logo)files.push(['logo.raw',logo.raw]);download(zipFiles(files),'PicoStation-SD.zip','application/zip');status((config.wallpaper&&!background)||(config.logo&&!logo)?'Archive générée. Elle conserve les images déjà sur la SD ; importe-les ici si tu veux aussi les inclure.':'Archive générée : décompresse son contenu à la racine de la carte SD.');});
 function text(value,x,y,color='#ffffff'){
   if(!glyphs.length)return;const scratch=document.createElement('canvas');scratch.width=320;scratch.height=16;const s=scratch.getContext('2d');s.imageSmoothingEnabled=false;let offset=0;
-  for(const c of value){if(c===' '){offset+=4;continue;}const g=glyphs[c.charCodeAt(0)-33];if(g){s.drawImage(font,...g,offset,0,g[2],g[3]);offset+=g[2];}}
+  for(const c of value){if(c===' '){offset+=4;continue;}const code=c.charCodeAt(0),g=glyphs[code-33];if(g){if(code>=0x80)ctx.drawImage(font,...g,x+offset,y,g[2],g[3]);else s.drawImage(font,...g,offset,0,g[2],g[3]);offset+=g[2];}}
   s.globalCompositeOperation='source-in';s.fillStyle=color;s.fillRect(0,0,320,16);ctx.drawImage(scratch,x,y);
 }
 function render(){
@@ -69,7 +69,7 @@ function render(){
   if(config.wallpaper&&background)ctx.putImageData(new ImageData(new Uint8ClampedArray(background.rgba),320,240),0,0);
   const classic=!!config.style,px=9,py=classic?33:15,pw=classic?302:172,ph=classic?177:195;
   ctx.strokeStyle='#'+config.frame;ctx.lineWidth=1;ctx.strokeRect(px-.5,py-.5,pw+1,ph+1);ctx.globalAlpha=(config.wallpaper&&background)?0.5:1;ctx.fillStyle='#'+config.filelist;ctx.fillRect(px,py,pw,ph);ctx.globalAlpha=1;
-  const names=['  Ma collection','  Ridge Racer (NTSC-U)','  Crash Bandicoot','  Metal Gear Solid','  Wipeout 2097'];
+  const names=['\x92 Ma collection','\x8f Ridge Racer (NTSC-U)','\x8f Crash Bandicoot','\x8f Metal Gear Solid','\x8f Wipeout 2097'];
   ctx.fillStyle='#'+config.cursor;ctx.fillRect(9,py+13,164,13);names.forEach((name,i)=>text(name,10,py+i*13,'#'+config.text));
   const lx=classic?100:185,ly=classic?10:14;
   if(config.logo&&logo){const under=ctx.getImageData(lx,ly,128,20),out=new Uint8ClampedArray(under.data);for(let i=0;i<2560;i++){const p=composePixel([...logo.rgba.slice(i*4,i*4+4)],[...under.data.slice(i*4,i*4+3)]);out.set([...p,255],i*4);}ctx.putImageData(new ImageData(out,128,20),lx,ly);}
